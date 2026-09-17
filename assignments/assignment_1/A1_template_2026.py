@@ -30,6 +30,8 @@ import networkx as nx
 import numpy as np
 import torch
 from mujoco import viewer
+from typing import cast
+
 
 # Local scripts
 from tree_edit_distance import (
@@ -54,6 +56,17 @@ from ariel.ec.genotypes.tree.operators import random_tree
 from ariel.simulation.environments import SimpleFlatWorld
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.video_recorder import VideoRecorder
+
+from ariel.ec import (
+    EA,
+    Crossover,
+    EAOperation,
+    Individual,
+    IntegerMutator,
+    IntegersGenerator,
+    Population,
+    config,
+)
 
 # Type aliases
 type GenotypeTypes = Literal["nde", "tree"]
@@ -212,7 +225,7 @@ def random_nde_body(num_modules: int = NUM_OF_MODULES) -> nx.DiGraph:
     return decoder.probability_matrices_to_graph(type_p, conn_p, rot_p)
 
 
-def random_tree_body(num_modules: int = NUM_OF_MODULES) -> nx.DiGraph:
+def random_tree_body(num_modules: int = NUM_OF_MODULES):
     """Sample a random tree genotype and convert it into a body graph.
 
     THIS IS THE FUNCTION YOUR EA REPLACES. Here the genotype IS the tree, so
@@ -220,13 +233,13 @@ def random_tree_body(num_modules: int = NUM_OF_MODULES) -> nx.DiGraph:
     when it is time to compute fitness.
     """
     genome = random_tree(max_modules=num_modules)
-    return genome.to_networkx()
+    return genome
 
 
 def random_body(
     genotype: GenotypeTypes = GENOTYPE,
     num_modules: int = NUM_OF_MODULES,
-) -> nx.DiGraph:
+) 
     """Sample one random body using the chosen encoding."""
     match genotype:
         case "nde":
@@ -323,6 +336,77 @@ def show_body(
 #  5. ENTRY POINT
 # ============================================================================ #
 
+def fittest_solution(generation, generation_fitness):
+    best_fitness = -1000
+    best_individual = None
+
+    # Find individual with the highest fitness value
+    for i in range (len(generation)):
+        fitness = generation_fitness[i]
+        
+        # Set new best fitness if the current fitness is higher than the previously highest fitness
+        if fitness > best_fitness:
+            best_fitness = fitness
+            best_individual = generation[i]
+
+    return (best_fitness, best_individual)
+
+def selection(generation, generation_fitness, k):
+    # Select k random individuals from the generation
+    selection_mask = []
+    for i in range(k):
+        index = random.randint(0, len(generation) - 1)
+        if index not in selection_mask:
+            selection_mask.append(index)
+        else:
+            i -= 1
+
+    # Get fittest individual
+    current_winner = selection_mask[0]
+    current_winner_fitness = generation_fitness[current_winner]
+
+    for i in range(1, len(selection_mask)):
+        fitness = generation_fitness[selection_mask[i]]
+        
+        # Check if the current individual is fitter than the current winner
+        if fitness > current_winner_fitness:
+            current_winner = selection_mask[i]
+            current_winner_fitness = fitness
+
+    return current_winner
+
+def crossover(parent_1, parent_2, p_crossover):
+    if np.random.uniform() > p_crossover:
+        # Do not perform crossover
+        return parent_1, parent_2
+
+    else:
+        # Crossover from new_EC_engine_example.py
+        gene_1, gene_2 = Crossover.one_point(
+            cast("list[int]", parent_1.genotype),
+            cast("list[int]", parent_2.genotype),
+        )   
+
+        child_1 = Individual()
+        child_1.genotype = [int(gene) for gene in gene_1]
+        child_1.tags = {"mutate": True}
+
+        child_2 = Individual()
+        child_2.genotype = [int(gene) for gene in gene_2]
+        child_2.tags = {"mutate": True}
+
+        return child_1, child_2
+
+def mutation(child, p_mutation):
+    # Create a copy of the child
+    child_mutated = child.copy()
+
+    # mutate genes with a probability of p_mutation
+    for i in range(len(child_mutated)):
+        if random.random() < p_mutation:
+            # Perform mutation
+
+    return child_mutated
 
 def main() -> None:
     """Score one randomly-sampled body against the target set."""
@@ -346,18 +430,114 @@ def main() -> None:
     console.log(f"target spread : mean pairwise distance {np.mean(spread):.2f}")
 
     # --- One random body --------------------------------------------------- #
-    body = random_body(GENOTYPE, NUM_OF_MODULES)
-    fitness = fitness_function(body, targets)
+    # body = random_body(GENOTYPE, NUM_OF_MODULES)
+    # fitness = fitness_function(body, targets)
 
-    console.log("")
-    console.log(f"random body   : {body.number_of_nodes()} modules")
-    console.log(
-        "per-target    : "
-        + ", ".join(f"{d:.1f}" for d in distances_to_targets(body, targets)),
-    )
-    console.log(f"fitness       : {fitness:.4f}   (lower is better)")
+    # console.log("")
+    # console.log(f"random body   : {body.number_of_nodes()} modules")
+    # console.log(
+    #     "per-target    : "
+    #     + ", ".join(f"{d:.1f}" for d in distances_to_targets(body, targets)),
+    # )
+    # console.log(f"fitness       : {fitness:.4f}   (lower is better)")
 
-    show_body(body, MODE, file_name=f"random_{GENOTYPE}")
+    # show_body(body, MODE, file_name=f"random_{GENOTYPE}")
+
+    # --- N bodies, with selection, mutationa and crossover ----------------- #
+    
+    # Define parameters
+    n_population = 50
+    p_mutation = 0.1
+    p_crossover = 0.6
+    n_iter = 100
+    n_children = 2
+    n_parents = int(n_population / n_children)
+
+    # --- Baseline ---------------------------------------------------------- #
+    # Selection process is random
+    generation_baseline = []
+    generation_fitness_baseline = []
+
+    # Initialise population
+    for i in range(n_population):
+        body = random_body(GENOTYPE, NUM_OF_MODULES)
+        fitness = fitness_function(body.to_networkx(), targets)
+        generation_baseline.append(body)
+        generation_fitness_baseline.append(fitness)
+
+    best_fit_old, best_ind_old = fittest_solution(generation_baseline, generation_fitness_baseline)
+    fitness_history_baseline = [best_fit_old]
+
+    for i in range(n_iter):
+        # List for new generation
+        new_generation = []
+        new_generation_fitness = []
+
+        # Loop over number of parent pairs
+        for j in range(n_parents):
+            # Select parents randomly
+            parent_1 = generation_baseline[random.randint(0, n_population - 1)]
+            parent_2 = generation_baseline[random.randint(0, n_population - 1)]
+
+            # Make sure parents are not the same
+            while parent_1 == parent_2:
+                parent_2 = generation_baseline[random.randint(0, n_population - 1)]
+
+            # Crossover
+            child_1, child_2 = crossover(parent_1, parent_2, p_crossover)
+
+            # Mutation
+            child_1 = mutation(child_1, p_mutation)
+            child_2 = mutation(child_2, p_mutation)
+
+            new_generation.append(child_1)
+            new_generation.append(child_2)
+
+            new_generation_fitness.append(fitness_function(child_1.to_networkx(), targets))
+            new_generation_fitness.append(fitness_function(child_2.to_networkx(), targets))
+
+        generation_baseline = new_generation
+        generation_fitness_baseline = new_generation_fitness
+
+        # Find best individual in the new generation
+        best_fit_new, best_ind_new = fittest_solution(generation_baseline, generation_fitness_baseline)
+
+        if best_fit_new > best_fit_old:
+            best_fit_old = best_fit_new
+            best_ind_old = best_ind_new
+
+        fitness_history_baseline.append(best_fit_old)
+
+        if i % 25 == 0:
+            print("The current best individual in generation {0} has value {1} and packs items {2}".format(i, best_fit_old, best_ind_old))
+
+    # --- Method 1 --------------------------------------------------------- #
+    # k = 3
+    
+    # generation_m1 = []
+    # generation_fitness_m1 = []
+
+    # # Initialise population
+    # for i in range(n_population):
+    #     body = random_body(GENOTYPE, NUM_OF_MODULES)
+    #     fitness = fitness_function(body, targets)
+    #     generation_m1.append(body)
+    #     generation_fitness_m1.append(fitness)
+
+    # best_fit_old, best_ind_old = fittest_solution(generation_m1, generation_fitness_m1)
+    # fitness_history_m1 = [best_fit_old]
+
+
+    # # Run simulation over n_iter generations
+    # for i in range(n_iter):
+    #     # Selection
+
+    #     # Crossover
+
+    #     # Mutation
+
+    # --- Method 2 --------------------------------------------------------- #
+
 
 
 if __name__ == "__main__":
