@@ -68,6 +68,21 @@ from ariel.ec import (
     config,
 )
 
+from ariel.ec.genotypes.tree.operators import (
+    _prune_invalid_edges,
+    crossover_subtree,
+    mutate_hoist,
+    mutate_replace_node,
+    mutate_shrink,
+    mutate_subtree_replacement,
+    random_tree,
+    validate_tree_depth,
+)
+
+from ariel.ec.genotypes.tree.tree_genome import TreeGenome
+
+import copy
+
 # Type aliases
 type GenotypeTypes = Literal["nde", "tree"]
 type ViewerTypes = Literal["launcher", "video", "frame", "none"]
@@ -233,7 +248,7 @@ def random_tree_body(num_modules: int = NUM_OF_MODULES):
     when it is time to compute fitness.
     """
     genome = random_tree(max_modules=num_modules)
-    return genome
+    return genome.to_networkx()
 
 
 def random_body(
@@ -336,8 +351,15 @@ def show_body(
 #  5. ENTRY POINT
 # ============================================================================ #
 
-def fittest_solution(generation, generation_fitness):
-    best_fitness = -1000
+def create_random_tree(num_modules):
+    genome = random_tree(num_modules)
+    ind = Individual()
+    ind.genotype = genome.to_dict()
+
+    return ind
+
+def fittest_solution(generation: Population, generation_fitness):
+    best_fitness = 1000
     best_individual = None
 
     # Find individual with the highest fitness value
@@ -345,13 +367,15 @@ def fittest_solution(generation, generation_fitness):
         fitness = generation_fitness[i]
         
         # Set new best fitness if the current fitness is higher than the previously highest fitness
-        if fitness > best_fitness:
+        if fitness < best_fitness:
             best_fitness = fitness
             best_individual = generation[i]
 
     return (best_fitness, best_individual)
 
 def selection(generation, generation_fitness, k):
+    # Need to change to select all parents, not just one.
+
     # Select k random individuals from the generation
     selection_mask = []
     for i in range(k):
@@ -369,44 +393,72 @@ def selection(generation, generation_fitness, k):
         fitness = generation_fitness[selection_mask[i]]
         
         # Check if the current individual is fitter than the current winner
-        if fitness > current_winner_fitness:
+        if fitness < current_winner_fitness:
             current_winner = selection_mask[i]
             current_winner_fitness = fitness
 
     return current_winner
 
-def crossover(parent_1, parent_2, p_crossover):
+def crossover(parent_1: Individual, parent_2: Individual, p_crossover):
     if np.random.uniform() > p_crossover:
         # Do not perform crossover
         return parent_1, parent_2
 
     else:
-        # Crossover from new_EC_engine_example.py
-        gene_1, gene_2 = Crossover.one_point(
-            cast("list[int]", parent_1.genotype),
-            cast("list[int]", parent_2.genotype),
-        )   
+        # gene_1, gene_2 = Crossover.one_point(
+        #     cast("list[int]", parent_1.genotype),
+        #     cast("list[int]", parent_2.genotype),
+        # )   
+        genome_1 = TreeGenome.from_dict(parent_1.genotype)
+        genome_2 = TreeGenome.from_dict(parent_2.genotype)
 
-        child_1 = Individual()
-        child_1.genotype = [int(gene) for gene in gene_1]
-        child_1.tags = {"mutate": True}
-
-        child_2 = Individual()
-        child_2.genotype = [int(gene) for gene in gene_2]
-        child_2.tags = {"mutate": True}
+        child_1, child_2 = crossover_subtree(genome_1, genome_2)
 
         return child_1, child_2
 
-def mutation(child, p_mutation):
+def mutation(genome: TreeGenome):
+    # From 1_body_evolution_tree.py
     # Create a copy of the child
-    child_mutated = child.copy()
+    genome_copy = copy.deepcopy(genome)
 
-    # mutate genes with a probability of p_mutation
-    for i in range(len(child_mutated)):
-        if random.random() < p_mutation:
-            # Perform mutation
+    # Choose mutation type (standard GP mutation operators)
+    mutation_type = RNG.choice(
+        ["point", "subtree", "shrink", "hoist"], p=[0.4, 0.4, 0.1, 0.1],
+    )
 
-    return child_mutated
+    if mutation_type == "point":
+        # Point mutation: change node type/rotation
+        mutate_replace_node(genome_copy)
+    elif mutation_type == "subtree":
+        # Subtree mutation: replace subtree with new random tree
+        mutate_subtree_replacement(genome_copy, max_modules=NUM_OF_MODULES)
+    elif mutation_type == "shrink":
+        # Shrink mutation: replace node+subtree with single leaf
+        mutate_shrink(genome_copy)
+    elif mutation_type == "hoist":
+        # Hoist mutation: promote child to replace parent
+        mutate_hoist(genome_copy)
+
+    return genome_copy
+
+def evaluate(population: Population):
+    for ind in population:
+        if not ind.requires_eval:
+            continue
+
+        if not ind.alive:
+            continue
+
+        genome = TreeGenome.from_dict(ind.genotype)
+        body = genome.to_networkx()
+        fitness = fitness_function(body, load_targets())
+        ind.fitness = fitness
+        ind.requires_eval = False
+
+    return population
+
+def reproduction(population: Population) -> Population:
+    # See 1_body_evolution_tree.py
 
 def main() -> None:
     """Score one randomly-sampled body against the target set."""
@@ -459,15 +511,25 @@ def main() -> None:
     generation_fitness_baseline = []
 
     # Initialise population
-    for i in range(n_population):
-        body = random_body(GENOTYPE, NUM_OF_MODULES)
-        fitness = fitness_function(body.to_networkx(), targets)
-        generation_baseline.append(body)
+    generation_baseline = Population([create_random_tree(NUM_OF_MODULES) for _ in range(n_population)])
+    
+    for ind in generation_baseline:
+        genome = TreeGenome.from_dict(ind.genotype)
+        body = genome.to_networkx()
+        fitness = fitness_function(body, targets)
+        ind.fitness = fitness
         generation_fitness_baseline.append(fitness)
+
+    # for i in range(n_population):
+    #     body = random_body(GENOTYPE, NUM_OF_MODULES)
+    #     fitness = fitness_function(body.to_networkx(), targets)
+    #     generation_baseline.append(body)
+    #     generation_fitness_baseline.append(fitness)
 
     best_fit_old, best_ind_old = fittest_solution(generation_baseline, generation_fitness_baseline)
     fitness_history_baseline = [best_fit_old]
 
+    # Does not work, need to use EA framework (see 1_body_evolution_tree.py and new_EC_engine_example.py)
     for i in range(n_iter):
         # List for new generation
         new_generation = []
