@@ -54,6 +54,16 @@ from ariel.ec.genotypes.tree.operators import random_tree
 from ariel.simulation.environments import SimpleFlatWorld
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.video_recorder import VideoRecorder
+from ariel.ec import (
+    EA,
+    Crossover,
+    EAOperation,
+    Individual,
+    IntegerMutator,
+    IntegersGenerator,
+    Population,
+    config,
+    )
 
 # Type aliases
 type GenotypeTypes = Literal["nde", "tree"]
@@ -319,6 +329,23 @@ def show_body(
             video_renderer(model, data, duration=5.0, video_recorder=recorder)
 
 
+def tournament_selection(population, fitnesses, k):
+    p = np.random.choice(len(population), size=k, replace=False)
+    i = fitnesses[p]
+        
+    winner = p[np.argmin(i)]
+            
+    return winner
+
+def parent_selection(fitnesses, n_elitism: int, k: int, population: list[Individual], n_parents: int) -> list:
+    best_p = [population[i] for i in np.argsort(fitnesses[:n_elitism])]
+    random_p = [population[tournament_selection(population, fitnesses, k)] for _ in range(n_parents)]
+
+    parent = best_p + random_p
+    random.shuffle(parent)
+
+    return parent
+
 # ============================================================================ #
 #  5. ENTRY POINT
 # ============================================================================ #
@@ -346,8 +373,27 @@ def main() -> None:
     console.log(f"target spread : mean pairwise distance {np.mean(spread):.2f}")
 
     # --- One random body --------------------------------------------------- #
-    body = random_body(GENOTYPE, NUM_OF_MODULES)
-    fitness = fitness_function(body, targets)
+    SIZE = 50
+    initial = Population([random_body(GENOTYPE, NUM_OF_MODULES) for _ in range(SIZE)])
+    fitnesses = np.array([fitness_function(initial[i], targets) for i in range(SIZE)])
+
+    a = parent_selection(fitnesses=fitnesses, n_elitism=5, k=5, population=initial, n_parents=45)
+
+    print(a)
+
+    exit()
+
+    ops: list[EAOperation] = [
+        EAOperation(parent_selection),
+        EAOperation(crossover),
+        EAOperation(mutate),
+        EAOperation(evaluate),
+        EAOperation(survivor_selection),
+        ]
+
+    ea = EA(fitnesses, ops, num_steps= 50)
+    ea.run()
+    exit()
 
     console.log("")
     console.log(f"random body   : {body.number_of_nodes()} modules")
