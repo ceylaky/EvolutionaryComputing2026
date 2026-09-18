@@ -11,6 +11,7 @@ classifiers = ["Development Status :: 2 - Pre-Alpha"]
 dependencies = [
   "astropy>=7.0.0",
   "attrs>=25.4.0",
+  "console>=0.9912",
   "deap>=1.4.3",
   "gymnasium>=1.2.3",
   "ipykernel>=6.30.1",
