@@ -31,6 +31,7 @@ import numpy as np
 import torch
 from mujoco import viewer
 from typing import cast
+import matplotlib.pyplot as plt
 
 
 # Local scripts
@@ -254,7 +255,7 @@ def random_tree_body(num_modules: int = NUM_OF_MODULES):
 def random_body(
     genotype: GenotypeTypes = GENOTYPE,
     num_modules: int = NUM_OF_MODULES,
-) 
+): 
     """Sample one random body using the chosen encoding."""
     match genotype:
         case "nde":
@@ -457,8 +458,44 @@ def evaluate(population: Population):
 
     return population
 
-def reproduction(population: Population) -> Population:
+def reproduction(population: Population):
     # See 1_body_evolution_tree.py
+    return None
+
+def survivor_selection(population: Population):
+    # See 1_body_evolution_tree.py
+    return None
+
+def data_visualisation(
+    mean_fitness_baseline, 
+    mean_fitness_m1,
+    mean_fitness_m2,
+    ci_fitness_baseline,
+    ci_fitness_m1,
+    ci_fitness_m2,
+    n_iter
+):
+    x = np.arange(1, n_iter + 1)
+
+    plt.figure()
+    plt.plot(x, mean_fitness_baseline, label='Baseline')
+    plt.fill_between(x, mean_fitness_baseline - ci_fitness_baseline, mean_fitness_baseline + ci_fitness_baseline, alpha=0.2)
+
+    plt.plot(x, mean_fitness_m1, label='Method 1')
+    plt.fill_between(x, mean_fitness_m1 - ci_fitness_m1, mean_fitness_m1 + ci_fitness_m1, alpha=0.2)
+
+    plt.plot(x, mean_fitness_m2, label='Method 2')
+    plt.fill_between(x, mean_fitness_m2 - ci_fitness_m2, mean_fitness_m2 + ci_fitness_m2, alpha=0.2)
+
+    plt.xlabel('Generation')
+    plt.ylabel('Mean fitness')
+
+    plt.grid(True)
+    plt.xlim(0, n_iter)
+
+    plt.title('Mean fitness over generations with 95% confidence intervals')
+    plt.legend(loc='best')
+    plt.show()
 
 def main() -> None:
     """Score one randomly-sampled body against the target set."""
@@ -573,34 +610,32 @@ def main() -> None:
         if i % 25 == 0:
             print("The current best individual in generation {0} has value {1} and packs items {2}".format(i, best_fit_old, best_ind_old))
 
-    # --- Method 1 --------------------------------------------------------- #
-    # k = 3
+    --- Method 1 --------------------------------------------------------- #
+    k = 3
     
-    # generation_m1 = []
-    # generation_fitness_m1 = []
+    generation_m1 = []
+    generation_fitness_m1 = []
 
-    # # Initialise population
-    # for i in range(n_population):
-    #     body = random_body(GENOTYPE, NUM_OF_MODULES)
-    #     fitness = fitness_function(body, targets)
-    #     generation_m1.append(body)
-    #     generation_fitness_m1.append(fitness)
+    # Initialise population
+    for i in range(n_population):
+        body = random_body(GENOTYPE, NUM_OF_MODULES)
+        fitness = fitness_function(body, targets)
+        generation_m1.append(body)
+        generation_fitness_m1.append(fitness)
 
-    # best_fit_old, best_ind_old = fittest_solution(generation_m1, generation_fitness_m1)
-    # fitness_history_m1 = [best_fit_old]
+    best_fit_old, best_ind_old = fittest_solution(generation_m1, generation_fitness_m1)
+    fitness_history_m1 = [best_fit_old]
 
 
-    # # Run simulation over n_iter generations
-    # for i in range(n_iter):
-    #     # Selection
+    # Run simulation over n_iter generations
+    for i in range(n_iter):
+        # Selection
 
-    #     # Crossover
+        # Crossover
 
-    #     # Mutation
+        # Mutation
 
     # --- Method 2 --------------------------------------------------------- #
-
-
 
 if __name__ == "__main__":
     main()
